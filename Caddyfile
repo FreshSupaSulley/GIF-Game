@@ -1,0 +1,15 @@
+:8080 {
+	# Reverse proxy API and WebSocket traffic to the Node server
+	handle /api/* {
+		reverse_proxy app:3001
+	}
+
+	handle /ws/* {
+		reverse_proxy app:3001
+	}
+
+	# SPA fallback: serve static files, fall back to index.html
+	handle {
+		reverse_proxy app:3001
+	}
+}

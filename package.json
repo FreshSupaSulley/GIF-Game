@@ -1,0 +1,28 @@
+{
+  "name": "gif-guessing-game",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A multiplayer GIF guessing game built as a Discord Activity",
+  "workspaces": [
+    "packages/shared",
+    "packages/server",
+    "packages/client"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "tsc --build"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "prettier": "^3.4.0",
+    "eslint": "^9.15.0",
+    "@typescript-eslint/eslint-plugin": "^8.16.0",
+    "@typescript-eslint/parser": "^8.16.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

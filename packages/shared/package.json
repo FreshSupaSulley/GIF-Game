@@ -1,0 +1,16 @@
+{
+  "name": "@gif-game/shared",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Shared types, constants, and message definitions for the GIF guessing game",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc --build",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "files": [
+    "dist",
+    "src"
+  ]
+}
