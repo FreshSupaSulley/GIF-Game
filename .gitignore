@@ -4,6 +4,21 @@ node_modules/
 # Build output
 dist/
 *.tsbuildinfo
+*.d.ts
+!vite-env.d.ts
+*.d.ts.map
+*.js.map
+
+# Compiled config files (Vite/Vitest load .ts/.mts natively)
+packages/**/vite.config.js
+packages/**/vitest.config.js
+packages/**/vitest.config.mjs
+packages/**/*.config.d.ts
+packages/**/*.config.d.mts
+packages/**/*.config.d.ts.map
+packages/**/*.config.d.mts.map
+packages/**/*.config.js.map
+packages/**/*.config.mjs.map
 
 # Environment
 .env

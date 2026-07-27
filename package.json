@@ -9,13 +9,14 @@
     "packages/client"
   ],
   "scripts": {
-    "build": "npm run build --workspaces",
+    "dev": "./dev.sh",
     "dev:server": "npm run dev --workspace=packages/server",
     "dev:client": "npm run dev --workspace=packages/client",
+    "build": "npm run build --workspaces",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "typecheck": "tsc --build"
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "typescript": "^5.7.0",

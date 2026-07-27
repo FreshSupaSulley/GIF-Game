@@ -8,21 +8,15 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
-    "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true,
-    "composite": true,
-    "incremental": true,
+    "noEmit": true,
     "paths": {
-      "@gif-game/shared/*": ["./packages/shared/src/*"],
-      "@gif-game/server/*": ["./packages/server/src/*"],
-      "@gif-game/client/*": ["./packages/client/src/*"]
+      "@gif-game/shared": ["./packages/shared/src/index.ts"],
+      "@gif-game/server": ["./packages/server/src/index.ts"]
     }
   },
-  "references": [
-    { "path": "./packages/shared" },
-    { "path": "./packages/server" },
-    { "path": "./packages/client" }
+  "include": [
+    "packages/shared/src/**/*.ts",
+    "packages/server/src/**/*.ts"
   ],
-  "exclude": ["node_modules", "dist", "*.config.js"]
+  "exclude": ["node_modules", "**/dist", "**/node_modules"]
 }

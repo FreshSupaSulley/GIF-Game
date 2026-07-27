@@ -9,18 +9,13 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
+    "noEmit": true,
     "jsx": "react-jsx",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "composite": true,
-    "outDir": "./dist",
-    "declaration": true,
-    "declarationMap": true,
-    "emitDeclarationOnly": true,
-    "rootDir": "."
+    "paths": {
+      "@gif-game/shared": ["../shared/src/index.ts"]
+    }
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "vite-env.d.ts"],
-  "exclude": ["node_modules", "dist", "vite.config.ts"],
-  "references": [
-    { "path": "../shared" }
-  ]
+  "exclude": ["node_modules", "dist"]
 }
