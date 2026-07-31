@@ -13,7 +13,7 @@ export interface JoinMessage {
 export interface ConfigUpdateMessage {
   type: 'config:update';
   key: string;
-  value: number;
+  value: number | boolean;
 }
 
 export interface GameStartMessage {
@@ -30,6 +30,8 @@ export interface GifSelectMessage {
   gifId: string;
   gifUrl: string;
   title: string;
+  /** The search query used to find this GIF. */
+  query?: string;
 }
 
 export interface GifDeselectMessage {
@@ -45,6 +47,16 @@ export interface GuessSubmitterMessage {
 export interface GuessTitleMessage {
   type: 'guess:title';
   text: string;
+  /** Optional: guess what search query the submitter used */
+  queryGuess?: string;
+}
+
+export interface PlayAgainMessage {
+  type: 'game:playAgain';
+}
+
+export interface NewGameMessage {
+  type: 'game:newGame';
 }
 
 export type ClientMessage =
@@ -55,7 +67,9 @@ export type ClientMessage =
   | GifSelectMessage
   | GifDeselectMessage
   | GuessSubmitterMessage
-  | GuessTitleMessage;
+  | GuessTitleMessage
+  | PlayAgainMessage
+  | NewGameMessage;
 
 // ---------------------------------------------------------------------------
 // Server -> Client messages

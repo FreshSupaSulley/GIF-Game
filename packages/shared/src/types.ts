@@ -33,6 +33,8 @@ export interface GameConfig {
   guessTimeLimit: number;
   /** Calculated: 15 + 10 * (roundCount - 1). */
   submissionTimeLimit: number;
+  /** Whether players must guess the search query used (default false). */
+  queryGuessEnabled: boolean;
 }
 
 /** A player connected to the game room. */
@@ -59,6 +61,8 @@ export interface SelectedGif {
   thumbnailUrl: string;
   /** GIF title metadata from KLIPY (defaults to "Untitled GIF" if absent). */
   title: string;
+  /** The search query used to find this GIF (for query-based scoring). */
+  query?: string;
 }
 
 /** An anonymous entry in the mystery pool shown during guessing. */
@@ -67,6 +71,8 @@ export interface MysteryPoolEntry {
   /** Player who submitted this GIF (hidden from clients until resolved). */
   submitterId: string;
   resolved: boolean;
+  /** The search query used to find this GIF (for scoring). */
+  query?: string;
 }
 
 /** Countdown timer state attached to a phase. */
@@ -88,5 +94,15 @@ export interface ScoreBreakdown {
   exactMatchPoints: number;
   semanticScore: number;
   semanticPoints: number;
+  /** The search query used to find this GIF (if available). */
+  queryUsed?: string;
+  /** Keywords matched against the query. */
+  queryKeywords: string[];
+  /** Points earned from query keyword matches. */
+  queryMatchPoints: number;
+  /** Semantic similarity score against the query. */
+  querySemanticScore: number;
+  /** Points earned from query semantic similarity. */
+  querySemanticPoints: number;
   totalPoints: number;
 }

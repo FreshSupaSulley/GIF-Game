@@ -1,3 +1,5 @@
+# DEV ALWAYS ASSUMES WE ARE RUNNING ON CONSISTENT PORTS!!
+
 #!/bin/bash
 # dev.sh - Boots the client, server, and Cloudflare tunnel for Discord Activity development.
 # Usage: ./dev.sh
@@ -53,9 +55,11 @@ TUNNEL_PID=$!
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo " All services running. Look for the tunnel URL above."
-echo " Update Discord Developer Portal → Activities → URL Mapping"
-echo " with the tunnel URL if it changed."
+echo " Waiting for tunnel URL..."
+echo " Copy the *.trycloudflare.com URL and add it to:"
+echo " Discord Developer Portal → Activities → URL Mappings"
+echo ""
+echo " Map: /  →  {tunnel-url}"
 echo ""
 echo " Press Ctrl+C to stop all services."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

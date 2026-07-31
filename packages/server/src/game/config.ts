@@ -30,6 +30,7 @@ export function createDefaultConfig(): GameConfig {
     roundCount,
     guessTimeLimit: GUESS_TIME_LIMIT_DEFAULT_SECONDS,
     submissionTimeLimit: calculateSubmissionTimeLimit(roundCount),
+    queryGuessEnabled: true,
   };
 }
 
@@ -55,6 +56,7 @@ export function validateConfig(
 
   let roundCount = base.roundCount;
   let guessTimeLimit = base.guessTimeLimit;
+  let queryGuessEnabled = base.queryGuessEnabled;
 
   // Validate roundCount
   if (update.roundCount !== undefined) {
@@ -99,6 +101,18 @@ export function validateConfig(
     }
   }
 
+  // Validate queryGuessEnabled (boolean)
+  if (update.queryGuessEnabled !== undefined) {
+    if (typeof update.queryGuessEnabled !== 'boolean') {
+      errors.push({
+        field: 'queryGuessEnabled',
+        message: `queryGuessEnabled must be a boolean`,
+      });
+    } else {
+      queryGuessEnabled = update.queryGuessEnabled;
+    }
+  }
+
   // submissionTimeLimit is always derived — ignore any client-supplied value
   if (errors.length > 0) {
     return { ok: false, errors };
@@ -110,6 +124,7 @@ export function validateConfig(
       roundCount,
       guessTimeLimit,
       submissionTimeLimit: calculateSubmissionTimeLimit(roundCount),
+      queryGuessEnabled,
     },
   };
 }
