@@ -90,6 +90,10 @@ export interface ScoreBreakdown {
   /** Whether the guesser correctly identified the submitter (null if skipped in 2-player games). */
   submitterGuessCorrect: boolean | null;
   submitterPoints: number;
+  /** Whether the guess matched the GIF title exactly (case-insensitive). */
+  perfectMatch?: boolean;
+  /** Bonus points for perfect title match. */
+  perfectMatchBonus?: number;
   exactKeywords: string[];
   exactMatchPoints: number;
   semanticScore: number;

@@ -1,10 +1,13 @@
-import { useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { useGameState, useSend } from '../hooks';
 import { Button, Card, Avatar } from '../components/ui';
 
 export function ScoreboardView() {
   const { scores, players, isHost } = useGameState();
   const send = useSend();
+  
+  // State to disable buttons after clicking
+  const [isLoading, setIsLoading] = useState(false);
 
   // Sort players by score (descending)
   const rankedPlayers = useMemo(() => {
@@ -34,10 +37,12 @@ export function ScoreboardView() {
 
   // Handle restart options
   const handlePlayAgain = useCallback(() => {
+    setIsLoading(true);
     send({ type: 'game:playAgain' });
   }, [send]);
 
   const handleNewGame = useCallback(() => {
+    setIsLoading(true);
     send({ type: 'game:newGame' });
   }, [send]);
 
@@ -82,17 +87,14 @@ export function ScoreboardView() {
 
       {/* Host Controls */}
       {isHost && (
-        <Card style={styles.hostControls}>
-          <h3 style={styles.controlsTitle}>What's next?</h3>
-          <div style={styles.buttonRow}>
-            <Button variant="primary" onClick={handlePlayAgain}>
-              Play Again (Same Settings)
-            </Button>
-            <Button variant="secondary" onClick={handleNewGame}>
-              New Game
-            </Button>
-          </div>
-        </Card>
+        <div style={styles.buttonRow}>
+          <Button variant="primary" onClick={handlePlayAgain} disabled={isLoading}>
+            Play Again (Same Settings)
+          </Button>
+          <Button variant="secondary" onClick={handleNewGame} disabled={isLoading}>
+            New Game
+          </Button>
+        </div>
       )}
 
       {/* Non-host waiting message */}
@@ -178,7 +180,7 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 500,
   },
   playerScore: {
-    color: '#5865F2',
+    color: '#FAA61A',
     fontWeight: 700,
     fontSize: '1.25rem',
     fontVariantNumeric: 'tabular-nums',

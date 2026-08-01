@@ -61,10 +61,27 @@ export const KLIPY_RETRY_COUNT = 3;
 /**
  * Points awarded per exact keyword match between the player's title guess
  * and the GIF's actual title (after stop-word removal, case-insensitive).
+ * This is a bonus on top of partial match points.
  * @range 1-1000
- * @default 100
+ * @default 50
  */
-export const EXACT_KEYWORD_MATCH_POINTS = 100;
+export const EXACT_KEYWORD_MATCH_POINTS = 50;
+
+/**
+ * Points awarded per partial keyword match (prefix, substring, or typo).
+ * More forgiving than exact matches - rewards close guesses.
+ * @range 1-500
+ * @default 25
+ */
+export const PARTIAL_KEYWORD_MATCH_POINTS = 25;
+
+/**
+ * Super bonus points awarded when the player's guess matches the GIF title
+ * exactly (case-insensitive, after trimming whitespace).
+ * @range 1-1000
+ * @default 200
+ */
+export const PERFECT_TITLE_MATCH_BONUS = 200;
 
 /**
  * Points awarded when no exact keyword matches exist but the semantic
@@ -142,6 +159,27 @@ export const MIN_GUESS_TIME = 10;
  * @default 60
  */
 export const MAX_GUESS_TIME = 60;
+
+/**
+ * Minimum submission time limit (in seconds) configurable by the host.
+ * @range 15-120
+ * @default 15
+ */
+export const MIN_SUBMISSION_TIME = 15;
+
+/**
+ * Maximum submission time limit (in seconds) configurable by the host.
+ * @range 15-120
+ * @default 120
+ */
+export const MAX_SUBMISSION_TIME = 120;
+
+/**
+ * Default submission time limit (in seconds).
+ * @range 15-120
+ * @default 30
+ */
+export const DEFAULT_SUBMISSION_TIME = 30;
 
 /**
  * Maximum number of GIF search results returned from a single KLIPY query.

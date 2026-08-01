@@ -1,6 +1,7 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { useGameState, useSend, useSubscription, useDiscordUser } from '../hooks';
-import { Button, Card, Input, GifCard, Timer, PlayerBadge, LoadingSpinner } from '../components/ui';
+import { Button, Card, Input, GifCard, PlayerBadge, LoadingSpinner } from '../components/ui';
 import { proxyGifUrl } from '../utils';
 import type { GifResult } from '@gif-game/shared';
 
@@ -13,10 +14,13 @@ export function SubmissionView() {
   const [lastSearchQuery, setLastSearchQuery] = useState(''); // Track query that produced current results
   const [searchResults, setSearchResults] = useState<GifResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
-  const [timerMs, setTimerMs] = useState(0);
-
+  
   const roundCount = config?.roundCount ?? 3;
   const submissionTimeLimit = (config?.submissionTimeLimit ?? 45) * 1000;
+  
+  // Initialize timer from state or default to full time
+  const initialTimerMs = state?.submissionTimer?.remainingMs ?? submissionTimeLimit;
+  const [timerMs, setTimerMs] = useState(initialTimerMs);
 
   // Get current player's submission
   const mySubmission = user ? state?.submissions[user.id] : null;
@@ -84,8 +88,6 @@ export function SubmissionView() {
         <p style={styles.subtitle}>Waiting for other players...</p>
 
         <Card style={styles.waitingCard}>
-          <Timer remainingMs={timerMs} totalMs={submissionTimeLimit} label="Time Remaining" />
-
           <div style={styles.playerStatus}>
             {Object.values(players).map((player) => {
               const submission = state?.submissions[player.id];
@@ -116,11 +118,6 @@ export function SubmissionView() {
       <p style={styles.subtitle}>
         Search and select {roundCount} GIF{roundCount > 1 ? 's' : ''} for others to guess
       </p>
-
-      {/* Timer */}
-      <Card style={styles.timerCard}>
-        <Timer remainingMs={timerMs} totalMs={submissionTimeLimit} />
-      </Card>
 
       {/* Selected GIFs */}
       <Card style={styles.selectedCard}>
@@ -162,25 +159,50 @@ export function SubmissionView() {
         </div>
 
         {/* Search Results */}
-        <div style={styles.resultsGrid}>
-          {searchResults.map((gif) => {
-            const isSelected = selectedGifs.some(g => g.id === gif.id);
-            const canSelect = !isSelected && selectedGifs.length < roundCount;
-            return (
-              <GifCard
-                key={gif.id}
-                src={proxyGifUrl(gif.thumbnailUrl || gif.url)}
-                title={gif.title}
-                selected={isSelected}
-                onClick={canSelect ? () => handleSelectGif(gif) : undefined}
-                size="small"
-              />
-            );
-          })}
-          {searchResults.length === 0 && !isSearching && (
-            <p style={styles.noResults}>Search for GIFs to get started!</p>
+        <AnimatePresence mode="wait">
+          {isSearching ? (
+            <motion.div
+              key="loading"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              style={styles.loadingContainer}
+            >
+              <LoadingSpinner size={32} />
+              <p style={styles.loadingText}>Searching...</p>
+            </motion.div>
+          ) : searchResults.length > 0 && (
+            <motion.div
+              key="results"
+              style={styles.resultsGrid}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+            >
+              {searchResults.map((gif, index) => {
+                const isSelected = selectedGifs.some(g => g.id === gif.id);
+                const canSelect = !isSelected && selectedGifs.length < roundCount;
+                return (
+                  <motion.div
+                    key={gif.id}
+                    initial={{ opacity: 0, scale: 0.8 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ delay: index * 0.03, type: 'spring', stiffness: 400, damping: 25 }}
+                  >
+                    <GifCard
+                      src={proxyGifUrl(gif.thumbnailUrl || gif.url)}
+                      title={gif.title}
+                      selected={isSelected}
+                      onClick={canSelect ? () => handleSelectGif(gif) : undefined}
+                      size="small"
+                    />
+                  </motion.div>
+                );
+              })}
+            </motion.div>
           )}
-        </div>
+        </AnimatePresence>
       </Card>
     </div>
   );
@@ -266,6 +288,18 @@ const styles: Record<string, React.CSSProperties> = {
     color: '#a0a0a0',
     textAlign: 'center',
     padding: '24px',
+  },
+  loadingContainer: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '32px',
+    gap: '12px',
+  },
+  loadingText: {
+    color: '#a0a0a0',
+    fontSize: '14px',
   },
   waitingCard: {
     width: '100%',

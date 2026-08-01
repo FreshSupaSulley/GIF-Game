@@ -76,8 +76,9 @@ export class RoomManager {
       this.rooms.set(instanceId, entry);
       console.log(`[RoomManager] Created new room: ${instanceId}`);
     } else {
-      // Update events (new connection endpoints)
+      // Update events (new connection endpoints) - important for broadcasts to reach new sockets
       entry.events = events;
+      entry.room.setEvents(events);  // Update the GameRoom's events too!
       entry.lastActivity = Date.now();
 
       // Cancel any pending cleanup

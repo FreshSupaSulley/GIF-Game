@@ -59,6 +59,15 @@ export interface NewGameMessage {
   type: 'game:newGame';
 }
 
+export interface HostTransferMessage {
+  type: 'host:transfer';
+  playerId: string;
+}
+
+export interface GameCancelMessage {
+  type: 'game:cancel';
+}
+
 export type ClientMessage =
   | JoinMessage
   | ConfigUpdateMessage
@@ -69,7 +78,9 @@ export type ClientMessage =
   | GuessSubmitterMessage
   | GuessTitleMessage
   | PlayAgainMessage
-  | NewGameMessage;
+  | NewGameMessage
+  | HostTransferMessage
+  | GameCancelMessage;
 
 // ---------------------------------------------------------------------------
 // Server -> Client messages

@@ -1,11 +1,13 @@
 import type { ScoreBreakdown } from '@gif-game/shared';
 import {
   EXACT_KEYWORD_MATCH_POINTS,
+  PARTIAL_KEYWORD_MATCH_POINTS,
+  PERFECT_TITLE_MATCH_BONUS,
   SEMANTIC_MATCH_POINTS,
   SEMANTIC_MATCH_THRESHOLD,
   CORRECT_SUBMITTER_GUESS_POINTS,
 } from '@gif-game/shared';
-import { extractKeywords, findMatchingKeywords } from './keywords';
+import { extractKeywords, findMatchingKeywords, findPartialMatches } from './keywords';
 import type { EmbeddingService } from './embedding-service';
 
 export interface ScoringInput {
@@ -25,7 +27,8 @@ export interface ScoringInput {
 }
 
 export interface ExactMatchResult {
-  matchedKeywords: string[];
+  matchedKeywords: string[];  // Exact matches
+  partialKeywords: string[];  // Partial matches (prefix, substring, typo)
   points: number;
 }
 
@@ -35,8 +38,9 @@ export interface SemanticMatchResult {
 }
 
 /**
- * Scores a title guess using exact keyword matching.
- * Case-insensitive, ignores stop words.
+ * Scores a title guess using keyword matching.
+ * - Exact matches: full points per keyword
+ * - Partial matches: reduced points (prefix, substring, typo tolerance)
  * 
  * @param guess - The player's title guess
  * @param gifTitle - The actual GIF title
@@ -46,12 +50,19 @@ export function scoreExactMatch(guess: string, gifTitle: string): ExactMatchResu
   const guessKeywords = extractKeywords(guess);
   const titleKeywords = extractKeywords(gifTitle);
   
-  const matchedKeywords = findMatchingKeywords(guessKeywords, titleKeywords);
-  const points = matchedKeywords.length * EXACT_KEYWORD_MATCH_POINTS;
+  const matches = findPartialMatches(guessKeywords, titleKeywords);
+  
+  const exactMatches = matches.filter(m => m.isExact).map(m => m.guessWord);
+  const partialMatches = matches.filter(m => !m.isExact).map(m => m.guessWord);
+  
+  // Exact matches get full points, partial matches get reduced points
+  const exactPoints = exactMatches.length * EXACT_KEYWORD_MATCH_POINTS;
+  const partialPoints = partialMatches.length * PARTIAL_KEYWORD_MATCH_POINTS;
   
   return {
-    matchedKeywords,
-    points,
+    matchedKeywords: exactMatches,
+    partialKeywords: partialMatches,
+    points: exactPoints + partialPoints,
   };
 }
 
@@ -89,14 +100,15 @@ export async function scoreSemanticMatch(
 }
 
 /**
- * Full scoring function that combines submitter guess, exact match, semantic match,
+ * Full scoring function that combines submitter guess, keyword match, semantic match,
  * and bonus query matching.
  * 
  * Scoring rules:
  * - Correct submitter guess: CORRECT_SUBMITTER_GUESS_POINTS (skipped in 2-player games)
- * - Exact keyword matches (title): EXACT_KEYWORD_MATCH_POINTS per keyword
- * - Semantic match (title): SEMANTIC_MATCH_POINTS if similarity >= threshold AND no exact matches
- * - Query keyword matches: EXACT_KEYWORD_MATCH_POINTS per keyword (bonus, uses queryGuess)
+ * - Exact keyword matches (title): EXACT_KEYWORD_MATCH_POINTS per keyword (bonus)
+ * - Partial keyword matches (title): PARTIAL_KEYWORD_MATCH_POINTS per keyword
+ * - Semantic match (title): SEMANTIC_MATCH_POINTS if similarity >= threshold AND no keyword matches
+ * - Query keyword matches: same points as title (bonus, uses queryGuess)
  * - Query semantic match: SEMANTIC_MATCH_POINTS if similarity >= threshold AND no query keyword matches
  * 
  * @param input - Scoring input containing guess details
@@ -118,12 +130,19 @@ export async function scoreGuess(
     submitterPoints = submitterGuessCorrect ? CORRECT_SUBMITTER_GUESS_POINTS : 0;
   }
 
-  // Exact keyword matching against title
-  const exactMatch = scoreExactMatch(titleGuess, gifTitle);
+  // Check for perfect title match (case-insensitive, trimmed)
+  const isPerfectMatch = titleGuess.trim().toLowerCase() === gifTitle.trim().toLowerCase();
+  const perfectMatchBonus = isPerfectMatch ? PERFECT_TITLE_MATCH_BONUS : 0;
 
-  // Semantic matching against title (only if no exact matches)
+  // Keyword matching against title (exact + partial)
+  const keywordMatch = scoreExactMatch(titleGuess, gifTitle);
+  
+  // Combine exact and partial keywords for display (exact matches shown first)
+  const allMatchedKeywords = [...keywordMatch.matchedKeywords, ...keywordMatch.partialKeywords];
+
+  // Semantic matching against title (only if no keyword matches at all)
   let semanticResult: SemanticMatchResult = { similarity: 0, points: 0 };
-  if (exactMatch.matchedKeywords.length === 0) {
+  if (allMatchedKeywords.length === 0) {
     semanticResult = await scoreSemanticMatch(titleGuess, gifTitle, embeddingService);
   }
 
@@ -136,9 +155,9 @@ export async function scoreGuess(
 
   if (query && queryGuess) {
     // Score the player's queryGuess against the actual query
-    const queryExactMatch = scoreExactMatch(queryGuess, query);
-    queryKeywords = queryExactMatch.matchedKeywords;
-    queryMatchPoints = queryExactMatch.points;
+    const queryKeywordMatch = scoreExactMatch(queryGuess, query);
+    queryKeywords = [...queryKeywordMatch.matchedKeywords, ...queryKeywordMatch.partialKeywords];
+    queryMatchPoints = queryKeywordMatch.points;
 
     // Semantic matching against query (only if no query keyword matches)
     if (queryKeywords.length === 0) {
@@ -148,7 +167,7 @@ export async function scoreGuess(
     }
   }
 
-  const totalPoints = submitterPoints + exactMatch.points + semanticResult.points + queryMatchPoints + querySemanticPoints;
+  const totalPoints = submitterPoints + perfectMatchBonus + keywordMatch.points + semanticResult.points + queryMatchPoints + querySemanticPoints;
 
   return {
     playerId,
@@ -156,8 +175,10 @@ export async function scoreGuess(
     guess: titleGuess,
     submitterGuessCorrect,
     submitterPoints,
-    exactKeywords: exactMatch.matchedKeywords,
-    exactMatchPoints: exactMatch.points,
+    perfectMatch: isPerfectMatch,
+    perfectMatchBonus,
+    exactKeywords: allMatchedKeywords, // Now includes both exact and partial
+    exactMatchPoints: keywordMatch.points,
     semanticScore: semanticResult.similarity,
     semanticPoints: semanticResult.points,
     queryUsed: query,

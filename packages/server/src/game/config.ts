@@ -6,30 +6,19 @@ import {
   MAX_ROUNDS,
   MIN_GUESS_TIME,
   MAX_GUESS_TIME,
-  SUBMISSION_FIRST_GIF_TIME_SECONDS,
-  SUBMISSION_ADDITIONAL_GIF_TIME_SECONDS,
+  MIN_SUBMISSION_TIME,
+  MAX_SUBMISSION_TIME,
+  DEFAULT_SUBMISSION_TIME,
 } from '@gif-game/shared';
-
-/**
- * Calculates the submission phase time limit based on round count.
- * Formula: SUBMISSION_FIRST_GIF_TIME_SECONDS + SUBMISSION_ADDITIONAL_GIF_TIME_SECONDS * (roundCount - 1)
- */
-export function calculateSubmissionTimeLimit(roundCount: number): number {
-  return (
-    SUBMISSION_FIRST_GIF_TIME_SECONDS +
-    SUBMISSION_ADDITIONAL_GIF_TIME_SECONDS * (roundCount - 1)
-  );
-}
 
 /**
  * Creates a default game configuration with all values at their defaults.
  */
 export function createDefaultConfig(): GameConfig {
-  const roundCount = DEFAULT_ROUNDS;
   return {
-    roundCount,
+    roundCount: DEFAULT_ROUNDS,
     guessTimeLimit: GUESS_TIME_LIMIT_DEFAULT_SECONDS,
-    submissionTimeLimit: calculateSubmissionTimeLimit(roundCount),
+    submissionTimeLimit: DEFAULT_SUBMISSION_TIME,
     queryGuessEnabled: true,
   };
 }
@@ -56,7 +45,6 @@ export function validateConfig(
 
   let roundCount = base.roundCount;
   let guessTimeLimit = base.guessTimeLimit;
-  let queryGuessEnabled = base.queryGuessEnabled;
 
   // Validate roundCount
   if (update.roundCount !== undefined) {
@@ -101,19 +89,33 @@ export function validateConfig(
     }
   }
 
-  // Validate queryGuessEnabled (boolean)
-  if (update.queryGuessEnabled !== undefined) {
-    if (typeof update.queryGuessEnabled !== 'boolean') {
+  // Validate submissionTimeLimit
+  let submissionTimeLimit = base.submissionTimeLimit;
+  if (update.submissionTimeLimit !== undefined) {
+    if (
+      typeof update.submissionTimeLimit !== 'number' ||
+      !Number.isInteger(update.submissionTimeLimit)
+    ) {
       errors.push({
-        field: 'queryGuessEnabled',
-        message: `queryGuessEnabled must be a boolean`,
+        field: 'submissionTimeLimit',
+        message: `submissionTimeLimit must be an integer`,
+      });
+    } else if (
+      update.submissionTimeLimit < MIN_SUBMISSION_TIME ||
+      update.submissionTimeLimit > MAX_SUBMISSION_TIME
+    ) {
+      errors.push({
+        field: 'submissionTimeLimit',
+        message: `submissionTimeLimit must be between ${MIN_SUBMISSION_TIME} and ${MAX_SUBMISSION_TIME}`,
       });
     } else {
-      queryGuessEnabled = update.queryGuessEnabled;
+      submissionTimeLimit = update.submissionTimeLimit;
     }
   }
 
-  // submissionTimeLimit is always derived — ignore any client-supplied value
+  // Validate queryGuessEnabled - REMOVED: now always enabled
+  // Query matching uses the same guess as title matching
+
   if (errors.length > 0) {
     return { ok: false, errors };
   }
@@ -123,8 +125,8 @@ export function validateConfig(
     config: {
       roundCount,
       guessTimeLimit,
-      submissionTimeLimit: calculateSubmissionTimeLimit(roundCount),
-      queryGuessEnabled,
+      submissionTimeLimit,
+      queryGuessEnabled: true, // Always enabled
     },
   };
 }

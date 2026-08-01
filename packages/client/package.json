@@ -13,6 +13,10 @@
   "dependencies": {
     "@discord/embedded-app-sdk": "^1.4.0",
     "@gif-game/shared": "*",
+    "@tsparticles/react": "^4.3.2",
+    "@tsparticles/slim": "^4.3.2",
+    "lottie-react": "^2.4.1",
+    "motion": "^12.43.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },

@@ -1,8 +1,28 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { useGameState, useSend, useSubscription, useDiscordUser } from '../hooks';
-import { Button, Card, Input, Timer, Avatar } from '../components/ui';
+import { Button, Card, Input, Avatar } from '../components/ui';
+import { StingerTransition } from '../components/StingerTransition';
+import type { StingerType } from '../components/StingerTransition';
 import { proxyGifUrl } from '../utils';
 import type { ScoreBreakdown } from '@gif-game/shared';
+
+// Sub-views within the guessing phase
+type GuessingSubView = 'my-turn' | 'spectator' | 'score-reveal';
+
+// Get stinger config for sub-view transitions
+function getSubViewStinger(from: GuessingSubView, to: GuessingSubView): { type: StingerType; color: string } {
+  // Score reveal always uses burst
+  if (to === 'score-reveal') {
+    return { type: 'burst', color: '#57F287' };
+  }
+  // Leaving score reveal uses radial
+  if (from === 'score-reveal') {
+    return { type: 'radial', color: '#5865F2' };
+  }
+  // Between turns uses diamond
+  return { type: 'diamond', color: '#EB459E' };
+}
 
 export function GuessingView() {
   const { state, config, players, currentGif, hostId } = useGameState();
@@ -11,18 +31,28 @@ export function GuessingView() {
 
   const [submitterGuess, setSubmitterGuess] = useState<string | null>(null);
   const [titleGuess, setTitleGuess] = useState('');
-  const [queryGuess, setQueryGuess] = useState('');
-  const [timerMs, setTimerMs] = useState(0);
-  const [scoreReveal, setScoreReveal] = useState<ScoreBreakdown | null>(null);
-
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const guessTimeLimit = (config?.guessTimeLimit ?? 30) * 1000;
-  const queryGuessEnabled = config?.queryGuessEnabled ?? false;
+  
+  // Initialize timer from state or default to full time
+  const initialTimerMs = state?.guessTimer?.remainingMs ?? guessTimeLimit;
+  const [timerMs, setTimerMs] = useState(initialTimerMs);
+  
+  // Sub-view state with stinger transitions
+  const [displayedSubView, setDisplayedSubView] = useState<GuessingSubView>('spectator');
+  const [isStingerActive, setIsStingerActive] = useState(false);
+  const [stingerKey, setStingerKey] = useState(0);
+  const [stingerConfig, setStingerConfig] = useState({ type: 'burst' as StingerType, color: '#57F287' });
+  const targetSubViewRef = useRef<GuessingSubView>('spectator');
+  const processingTransitionRef = useRef(false);
+  
+  // Score reveal data
+  const [scoreReveal, setScoreReveal] = useState<ScoreBreakdown | null>(null);
+  const pendingScoreRevealRef = useRef<ScoreBreakdown | null>(null);
+
   const isMyTurn = state?.turnOrder?.[state.currentTurnIndex] === user?.id;
   const currentGuesser = state?.turnOrder?.[state.currentTurnIndex];
   const currentGuesserPlayer = currentGuesser ? players[currentGuesser] : null;
-  
-  // Get the submitter's name for the query guess prompt
-  const submitterPlayer = submitterGuess ? players[submitterGuess] : null;
 
   // Get eligible players for submitter guess (exclude self AND CPUs)
   const eligiblePlayers = Object.values(players)
@@ -32,6 +62,52 @@ export function GuessingView() {
   // Skip submitter guess if there's only one eligible player (it's obvious)
   const skipSubmitterGuess = eligiblePlayers.length <= 1;
 
+  // Determine target sub-view based on current state
+  const targetSubView: GuessingSubView = scoreReveal ? 'score-reveal' : (isMyTurn ? 'my-turn' : 'spectator');
+
+  // Trigger stinger when sub-view changes
+  const triggerTransition = useCallback((to: GuessingSubView) => {
+    if (processingTransitionRef.current) {
+      targetSubViewRef.current = to;
+      return;
+    }
+    
+    const from = displayedSubView;
+    if (from === to) return;
+    
+    processingTransitionRef.current = true;
+    targetSubViewRef.current = to;
+    setStingerConfig(getSubViewStinger(from, to));
+    setStingerKey(k => k + 1);
+    setIsStingerActive(true);
+  }, [displayedSubView]);
+
+  // Handle stinger midpoint - swap view
+  const handleStingerMidpoint = useCallback(() => {
+    const target = targetSubViewRef.current;
+    setDisplayedSubView(target);
+    
+    // If transitioning to score-reveal, set the score data now
+    if (target === 'score-reveal' && pendingScoreRevealRef.current) {
+      setScoreReveal(pendingScoreRevealRef.current);
+    }
+  }, []);
+
+  // Handle stinger complete
+  const handleStingerComplete = useCallback(() => {
+    setIsStingerActive(false);
+    processingTransitionRef.current = false;
+    
+    // If we're on score reveal, schedule transition back
+    if (targetSubViewRef.current === 'score-reveal') {
+      setTimeout(() => {
+        pendingScoreRevealRef.current = null;
+        setScoreReveal(null);
+        // This will trigger the next transition
+      }, 2500);
+    }
+  }, []);
+
   // Subscribe to timer ticks
   useSubscription('timer:tick', useCallback((msg) => {
     if (msg.phase === 'guessing') {
@@ -39,18 +115,36 @@ export function GuessingView() {
     }
   }, []));
 
-  // Subscribe to score reveals
+  // Subscribe to score reveals - store pending and trigger transition
   useSubscription('score:reveal', useCallback((msg) => {
-    setScoreReveal(msg.breakdown);
-    // Clear after animation
-    setTimeout(() => setScoreReveal(null), 3000);
-  }, []));
+    pendingScoreRevealRef.current = msg.breakdown;
+    triggerTransition('score-reveal');
+  }, [triggerTransition]));
 
-  // Reset state when turn changes
+  // Handle turn changes - trigger transition to appropriate view
+  useEffect(() => {
+    const newTarget = isMyTurn ? 'my-turn' : 'spectator';
+    // Only transition if not showing score reveal
+    if (!scoreReveal && !pendingScoreRevealRef.current) {
+      if (displayedSubView !== newTarget) {
+        triggerTransition(newTarget);
+      }
+    }
+  }, [isMyTurn, scoreReveal, displayedSubView, triggerTransition]);
+
+  // When score reveal clears, transition to the correct turn view
+  useEffect(() => {
+    if (!scoreReveal && !pendingScoreRevealRef.current && displayedSubView === 'score-reveal') {
+      const newTarget = isMyTurn ? 'my-turn' : 'spectator';
+      triggerTransition(newTarget);
+    }
+  }, [scoreReveal, isMyTurn, displayedSubView, triggerTransition]);
+
+  // Reset input state when turn changes
   useEffect(() => {
     setSubmitterGuess(null);
     setTitleGuess('');
-    setQueryGuess('');
+    setIsSubmitting(false);
   }, [state?.currentTurnIndex, state?.currentGifIndex]);
 
   // Handle submitter guess
@@ -62,18 +156,18 @@ export function GuessingView() {
 
   // Check if submission is ready
   const submitterReady = skipSubmitterGuess || submitterGuess !== null;
-  const queryReady = !queryGuessEnabled || queryGuess.trim().length > 0;
-  const canSubmit = titleGuess.trim().length > 0 && submitterReady && queryReady;
+  const canSubmit = titleGuess.trim().length > 0 && submitterReady && !isSubmitting;
 
-  // Handle title guess (includes query guess)
+  // Handle title guess - same guess is used for both title AND query matching
   const handleTitleSubmit = useCallback(() => {
-    if (!isMyTurn || !canSubmit) return;
+    if (!isMyTurn || !canSubmit || isSubmitting) return;
+    setIsSubmitting(true);
     send({ 
       type: 'guess:title', 
       text: titleGuess.trim(),
-      queryGuess: queryGuessEnabled ? queryGuess.trim() : undefined,
+      queryGuess: titleGuess.trim(), // Same guess for both
     });
-  }, [send, isMyTurn, canSubmit, titleGuess, queryGuess, queryGuessEnabled]);
+  }, [send, isMyTurn, canSubmit, titleGuess, isSubmitting]);
 
   // Handle Enter key on inputs
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -85,110 +179,191 @@ export function GuessingView() {
   // Get the proxied GIF URL
   const gifUrl = currentGif?.gif.url ? proxyGifUrl(currentGif.gif.url) : '';
 
-  // Show score reveal overlay
-  if (scoreReveal) {
+  // Render score reveal content
+  const renderScoreReveal = () => {
+    if (!scoreReveal) return null;
     return (
-      <div style={styles.container}>
-        <Card style={styles.scoreRevealCard}>
-          <h2 style={styles.revealTitle}>Score Breakdown</h2>
-          
-          <div style={styles.revealContent}>
-            <div style={styles.revealRow}>
-              <span>Guess:</span>
-              <span>"{scoreReveal.guess}"</span>
+      <div style={styles.scoreRevealContainer}>
+        <motion.div
+          initial={{ scale: 0.8, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={{ type: 'spring', stiffness: 300, damping: 20 }}
+        >
+          <Card style={styles.scoreRevealCard}>
+            <h2 style={styles.revealTitle}>Score Breakdown</h2>
+            
+            <div style={styles.revealContent}>
+              <motion.div
+                style={styles.revealRow}
+                initial={{ x: -20, opacity: 0 }}
+                animate={{ x: 0, opacity: 1 }}
+                transition={{ delay: 0.1 }}
+              >
+                <span>Guess:</span>
+                <span>"{scoreReveal.guess}"</span>
+              </motion.div>
+              <motion.div
+                style={styles.revealRow}
+                initial={{ x: -20, opacity: 0 }}
+                animate={{ x: 0, opacity: 1 }}
+                transition={{ delay: 0.15 }}
+              >
+                <span>Actual Title:</span>
+                <span>"{scoreReveal.gifTitle}"</span>
+              </motion.div>
+
+              {scoreReveal.submitterGuessCorrect !== null && (
+                <motion.div
+                  style={styles.revealRow}
+                  initial={{ x: -20, opacity: 0 }}
+                  animate={{ x: 0, opacity: 1 }}
+                  transition={{ delay: 0.2 }}
+                >
+                  <span>Submitter Guess:</span>
+                  <span style={{ color: scoreReveal.submitterGuessCorrect ? '#43B581' : '#ED4245' }}>
+                    {scoreReveal.submitterGuessCorrect ? '✓ Correct' : '✗ Wrong'} (+{scoreReveal.submitterPoints})
+                  </span>
+                </motion.div>
+              )}
+
+              {scoreReveal.perfectMatch && (
+                <motion.div
+                  style={styles.revealRow}
+                  initial={{ x: -20, opacity: 0, scale: 1.1 }}
+                  animate={{ x: 0, opacity: 1, scale: 1 }}
+                  transition={{ delay: 0.22, type: 'spring', stiffness: 400 }}
+                >
+                  <span style={{ color: '#FFD700' }}>PERFECT MATCH!</span>
+                  <span style={{ color: '#FFD700', fontWeight: 700 }}>
+                    +{scoreReveal.perfectMatchBonus}
+                  </span>
+                </motion.div>
+              )}
+
+              {scoreReveal.exactKeywords.length > 0 && (
+                <motion.div
+                  style={styles.revealRow}
+                  initial={{ x: -20, opacity: 0 }}
+                  animate={{ x: 0, opacity: 1 }}
+                  transition={{ delay: 0.25 }}
+                >
+                  <span>Title Keywords:</span>
+                  <span style={{ color: '#43B581' }}>
+                    {scoreReveal.exactKeywords.join(', ')} (+{scoreReveal.exactMatchPoints})
+                  </span>
+                </motion.div>
+              )}
+
+              {scoreReveal.semanticPoints > 0 && (
+                <motion.div
+                  style={styles.revealRow}
+                  initial={{ x: -20, opacity: 0 }}
+                  animate={{ x: 0, opacity: 1 }}
+                  transition={{ delay: 0.3 }}
+                >
+                  <span>Title Similarity:</span>
+                  <span style={{ color: '#5865F2' }}>
+                    {(scoreReveal.semanticScore * 100).toFixed(0)}% match (+{scoreReveal.semanticPoints})
+                  </span>
+                </motion.div>
+              )}
+
+              {/* Query bonus section */}
+              {scoreReveal.queryUsed && (
+                <>
+                  <motion.div
+                    style={styles.revealRow}
+                    initial={{ x: -20, opacity: 0 }}
+                    animate={{ x: 0, opacity: 1 }}
+                    transition={{ delay: 0.35 }}
+                  >
+                    <span>Search Query:</span>
+                    <span style={{ color: '#a0a0a0' }}>"{scoreReveal.queryUsed}"</span>
+                  </motion.div>
+                  
+                  {scoreReveal.queryKeywords.length > 0 && (
+                    <motion.div
+                      style={styles.revealRow}
+                      initial={{ x: -20, opacity: 0 }}
+                      animate={{ x: 0, opacity: 1 }}
+                      transition={{ delay: 0.4 }}
+                    >
+                      <span>Query Keywords:</span>
+                      <span style={{ color: '#FAA61A' }}>
+                        {scoreReveal.queryKeywords.join(', ')} (+{scoreReveal.queryMatchPoints})
+                      </span>
+                    </motion.div>
+                  )}
+
+                  {scoreReveal.querySemanticPoints > 0 && (
+                    <motion.div
+                      style={styles.revealRow}
+                      initial={{ x: -20, opacity: 0 }}
+                      animate={{ x: 0, opacity: 1 }}
+                      transition={{ delay: 0.45 }}
+                    >
+                      <span>Query Similarity:</span>
+                      <span style={{ color: '#FAA61A' }}>
+                        {(scoreReveal.querySemanticScore * 100).toFixed(0)}% match (+{scoreReveal.querySemanticPoints})
+                      </span>
+                    </motion.div>
+                  )}
+                </>
+              )}
+
+              <motion.div
+                style={styles.totalRow}
+                initial={{ scale: 0.8, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                transition={{ type: 'spring', stiffness: 400, damping: 15, delay: 0.5 }}
+              >
+                <span>Total Points:</span>
+                <span style={styles.totalPoints}>+{scoreReveal.totalPoints}</span>
+              </motion.div>
             </div>
-            <div style={styles.revealRow}>
-              <span>Actual Title:</span>
-              <span>"{scoreReveal.gifTitle}"</span>
-            </div>
-
-            {scoreReveal.submitterGuessCorrect !== null && (
-              <div style={styles.revealRow}>
-                <span>Submitter Guess:</span>
-                <span style={{ color: scoreReveal.submitterGuessCorrect ? '#43B581' : '#ED4245' }}>
-                  {scoreReveal.submitterGuessCorrect ? '✓ Correct' : '✗ Wrong'} (+{scoreReveal.submitterPoints})
-                </span>
-              </div>
-            )}
-
-            {scoreReveal.exactKeywords.length > 0 && (
-              <div style={styles.revealRow}>
-                <span>Title Keywords:</span>
-                <span style={{ color: '#43B581' }}>
-                  {scoreReveal.exactKeywords.join(', ')} (+{scoreReveal.exactMatchPoints})
-                </span>
-              </div>
-            )}
-
-            {scoreReveal.semanticPoints > 0 && (
-              <div style={styles.revealRow}>
-                <span>Title Similarity:</span>
-                <span style={{ color: '#5865F2' }}>
-                  {(scoreReveal.semanticScore * 100).toFixed(0)}% match (+{scoreReveal.semanticPoints})
-                </span>
-              </div>
-            )}
-
-            {/* Query bonus section */}
-            {scoreReveal.queryUsed && (
-              <>
-                <div style={styles.revealRow}>
-                  <span>Search Query:</span>
-                  <span style={{ color: '#a0a0a0' }}>"{scoreReveal.queryUsed}"</span>
-                </div>
-                
-                {scoreReveal.queryKeywords.length > 0 && (
-                  <div style={styles.revealRow}>
-                    <span>Query Keywords:</span>
-                    <span style={{ color: '#FAA61A' }}>
-                      {scoreReveal.queryKeywords.join(', ')} (+{scoreReveal.queryMatchPoints})
-                    </span>
-                  </div>
-                )}
-
-                {scoreReveal.querySemanticPoints > 0 && (
-                  <div style={styles.revealRow}>
-                    <span>Query Similarity:</span>
-                    <span style={{ color: '#FAA61A' }}>
-                      {(scoreReveal.querySemanticScore * 100).toFixed(0)}% match (+{scoreReveal.querySemanticPoints})
-                    </span>
-                  </div>
-                )}
-              </>
-            )}
-
-            <div style={styles.totalRow}>
-              <span>Total Points:</span>
-              <span style={styles.totalPoints}>+{scoreReveal.totalPoints}</span>
-            </div>
-          </div>
-        </Card>
+          </Card>
+        </motion.div>
       </div>
     );
-  }
+  };
 
-  // Spectator view (not my turn)
-  if (!isMyTurn) {
-    return (
-      <div style={styles.container}>
-        <h1 style={styles.title}>Guessing Phase</h1>
+  // Render spectator view
+  const renderSpectator = () => (
+    <div style={styles.spectatorContainer}>
+        <motion.h1
+          style={styles.title}
+          initial={{ y: -30, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          transition={{ type: 'spring', stiffness: 300, damping: 20 }}
+        >
+          Guessing Phase
+        </motion.h1>
 
-        {/* Current GIF */}
+        {/* Current GIF with dramatic entrance */}
         {currentGif && (
-          <Card style={styles.gifCard}>
-            <img
-              src={gifUrl}
-              alt="Mystery GIF"
-              style={styles.gifImage}
-            />
-          </Card>
+          <motion.div
+            initial={{ scale: 0.5, opacity: 0, rotateY: -30 }}
+            animate={{ scale: 1, opacity: 1, rotateY: 0 }}
+            transition={{ type: 'spring', stiffness: 200, damping: 20, delay: 0.1 }}
+          >
+            <Card style={styles.gifCard}>
+              <img
+                src={gifUrl}
+                alt="Mystery GIF"
+                style={styles.gifImage}
+              />
+            </Card>
+          </motion.div>
         )}
 
         {/* Current guesser info */}
-        <Card style={styles.spectatorCard}>
-          <Timer remainingMs={timerMs} totalMs={guessTimeLimit} label="Time Remaining" />
-          
-          <div style={styles.currentGuesserInfo}>
+        <Card style={styles.spectatorCard} animate delay={0.2}>
+          <motion.div
+            style={styles.currentGuesserInfo}
+            initial={{ y: 20, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            transition={{ delay: 0.3 }}
+          >
             {currentGuesserPlayer && (
               <>
                 <Avatar src={currentGuesserPlayer.avatar} alt={currentGuesserPlayer.username} size={48} />
@@ -197,96 +372,155 @@ export function GuessingView() {
                 </span>
               </>
             )}
-          </div>
+          </motion.div>
         </Card>
 
-        <p style={styles.subtitle}>
+        <motion.p
+          style={styles.subtitle}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.4 }}
+        >
           Round {(state?.currentGifIndex ?? 0) + 1} of {state?.mysteryPool.length ?? '?'}
-        </p>
+        </motion.p>
       </div>
-    );
-  }
+  );
 
-  // My turn - active guessing view
-  return (
+  // Render my turn view
+  const renderMyTurn = () => (
     <div style={styles.container}>
-      <h1 style={styles.title}>Your Turn!</h1>
+      <motion.h1
+        style={styles.title}
+        initial={{ scale: 0.5, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        transition={{ type: 'spring', stiffness: 400, damping: 15 }}
+      >
+        Your Turn!
+      </motion.h1>
 
-      {/* Timer */}
-      <Card style={styles.timerCard}>
-        <Timer remainingMs={timerMs} totalMs={guessTimeLimit} />
-      </Card>
-
-      {/* Large GIF */}
+      {/* Large GIF with dramatic reveal */}
       {currentGif && (
-        <Card style={styles.gifCard}>
-          <img
-            src={gifUrl}
-            alt="Mystery GIF"
-            style={styles.gifImage}
-          />
-        </Card>
+        <motion.div
+          initial={{ scale: 0.3, opacity: 0, y: 50 }}
+          animate={{ scale: 1, opacity: 1, y: 0 }}
+          transition={{ type: 'spring', stiffness: 200, damping: 20, delay: 0.1 }}
+        >
+          <Card style={styles.gifCard}>
+            <img
+              src={gifUrl}
+              alt="Mystery GIF"
+              style={styles.gifImage}
+            />
+          </Card>
+        </motion.div>
       )}
 
       {/* Submitter Guess (skip if only CPUs or one eligible player) */}
       {!skipSubmitterGuess && (
-        <Card style={styles.submitterCard}>
-          <h3 style={styles.cardTitle}>Who submitted this GIF?</h3>
-          <div style={styles.playerGrid}>
-            {eligiblePlayers.map((player) => (
-              <button
-                key={player.id}
-                onClick={() => handleSubmitterGuess(player.id)}
-                disabled={submitterGuess !== null}
-                style={{
-                  ...styles.playerButton,
-                  borderColor: submitterGuess === player.id ? '#5865F2' : 'transparent',
-                  opacity: submitterGuess !== null && submitterGuess !== player.id ? 0.5 : 1,
-                }}
-              >
-                <Avatar src={player.avatar} alt={player.username} size={36} />
-                <span>{player.username}</span>
-              </button>
-            ))}
-          </div>
-        </Card>
+        <motion.div
+          initial={{ y: 30, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          transition={{ delay: 0.25 }}
+          style={{ width: '100%', maxWidth: '600px' }}
+        >
+          <Card style={styles.submitterCard}>
+            <h3 style={styles.cardTitle}>Who submitted this GIF?</h3>
+            <div style={styles.playerGrid}>
+              {eligiblePlayers.map((player, index) => (
+                <motion.button
+                  key={player.id}
+                  onClick={() => handleSubmitterGuess(player.id)}
+                  disabled={submitterGuess !== null}
+                  style={{
+                    ...styles.playerButton,
+                    borderColor: submitterGuess === player.id ? '#5865F2' : 'transparent',
+                    opacity: submitterGuess !== null && submitterGuess !== player.id ? 0.5 : 1,
+                  }}
+                  initial={{ scale: 0, opacity: 0 }}
+                  animate={{ scale: 1, opacity: submitterGuess !== null && submitterGuess !== player.id ? 0.5 : 1 }}
+                  transition={{ type: 'spring', stiffness: 400, damping: 20, delay: 0.3 + index * 0.05 }}
+                  whileHover={submitterGuess === null ? { scale: 1.05, y: -2 } : undefined}
+                  whileTap={submitterGuess === null ? { scale: 0.95 } : undefined}
+                >
+                  <Avatar src={player.avatar} alt={player.username} size={36} />
+                  <span>{player.username}</span>
+                </motion.button>
+              ))}
+            </div>
+          </Card>
+        </motion.div>
       )}
 
-      {/* Guess inputs - inline row */}
-      <div style={styles.inputRow}>
+      {/* Guess inputs - stacked vertically */}
+      <motion.div
+        style={styles.inputStack}
+        initial={{ y: 30, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={{ delay: 0.35 }}
+      >
         <Input
           value={titleGuess}
           onChange={(e) => setTitleGuess(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="GIF name?"
+          placeholder="What is this GIF?"
           maxLength={200}
           fullWidth
         />
-
-        {queryGuessEnabled && (
-          <Input
-            value={queryGuess}
-            onChange={(e) => setQueryGuess(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={`What did ${submitterPlayer?.username || 'they'} search?`}
-            maxLength={200}
-            fullWidth
-          />
-        )}
 
         <Button
           variant="primary"
           onClick={handleTitleSubmit}
           disabled={!canSubmit}
+          fullWidth
         >
           Submit
         </Button>
-      </div>
+      </motion.div>
 
-      {!submitterReady && (
-        <p style={styles.hint}>Select a player first</p>
-      )}
+      <AnimatePresence>
+        {!submitterReady && (
+          <motion.p
+            style={styles.hint}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            Select a player first
+          </motion.p>
+        )}
+      </AnimatePresence>
     </div>
+  );
+
+  // Render the current sub-view based on displayedSubView
+  const renderCurrentView = () => {
+    switch (displayedSubView) {
+      case 'score-reveal':
+        return renderScoreReveal();
+      case 'spectator':
+        return renderSpectator();
+      case 'my-turn':
+        return renderMyTurn();
+      default:
+        return renderSpectator();
+    }
+  };
+
+  // Main render with stinger overlay
+  return (
+    <>
+      {/* Stinger for sub-view transitions */}
+      <StingerTransition
+        key={stingerKey}
+        isActive={isStingerActive}
+        type={stingerConfig.type}
+        color={stingerConfig.color}
+        duration={0.8}
+        onMidpoint={handleStingerMidpoint}
+        onComplete={handleStingerComplete}
+      />
+      {renderCurrentView()}
+    </>
   );
 }
 
@@ -299,6 +533,26 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '24px',
     minHeight: '100vh',
     boxSizing: 'border-box',
+  },
+  spectatorContainer: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '24px',
+    minHeight: '100vh',
+    boxSizing: 'border-box',
+    backgroundColor: 'rgba(88, 101, 242, 0.08)', // Brighter purple tint for spectator
+  },
+  scoreRevealContainer: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '24px',
+    minHeight: '100vh',
+    boxSizing: 'border-box',
+    position: 'relative',
   },
   title: {
     fontSize: '2rem',
@@ -321,32 +575,20 @@ const styles: Record<string, React.CSSProperties> = {
     marginBottom: '16px',
   },
   gifImage: {
-    maxWidth: '500px',
-    maxHeight: '400px',
+    maxWidth: '700px',
+    maxHeight: '550px',
     borderRadius: '8px',
   },
   submitterCard: {
     marginBottom: '16px',
     width: '100%',
-    maxWidth: '600px',
   },
-  inputRow: {
+  inputStack: {
     display: 'flex',
+    flexDirection: 'column',
     gap: '12px',
     width: '100%',
-    maxWidth: '700px',
-    alignItems: 'center',
-  },
-  guessRow: {
-    display: 'flex',
-    gap: '16px',
-    width: '100%',
-    maxWidth: '700px',
-    marginBottom: '16px',
-  },
-  guessCard: {
-    flex: '1 1 0',
-    minWidth: 0,
+    maxWidth: '400px',
   },
   cardTitle: {
     fontSize: '1rem',
@@ -372,21 +614,12 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: '8px',
     cursor: 'pointer',
     color: '#fff',
-    transition: 'border-color 0.2s',
-  },
-  inputRow: {
-    display: 'flex',
-    gap: '12px',
   },
   hint: {
     color: '#a0a0a0',
     fontSize: '14px',
     marginTop: '8px',
     textAlign: 'center',
-  },
-  spectatorCard: {
-    textAlign: 'center',
-    padding: '24px',
   },
   currentGuesserInfo: {
     display: 'flex',
@@ -400,38 +633,45 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 600,
     color: '#fff',
   },
+  spectatorCard: {
+    textAlign: 'center',
+    padding: '24px',
+  },
   scoreRevealCard: {
     textAlign: 'center',
-    padding: '32px',
-    maxWidth: '400px',
+    padding: '48px',
+    maxWidth: '600px',
+    minWidth: '500px',
   },
   revealTitle: {
-    fontSize: '1.5rem',
+    fontSize: '2rem',
     fontWeight: 700,
     color: '#fff',
     margin: 0,
-    marginBottom: '24px',
+    marginBottom: '32px',
   },
   revealContent: {
     display: 'flex',
     flexDirection: 'column',
-    gap: '12px',
+    gap: '16px',
   },
   revealRow: {
     display: 'flex',
     justifyContent: 'space-between',
-    padding: '8px 0',
+    padding: '12px 0',
+    fontSize: '1.125rem',
     borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
   },
   totalRow: {
     display: 'flex',
     justifyContent: 'space-between',
-    padding: '16px 0',
-    marginTop: '8px',
+    padding: '20px 0',
+    marginTop: '12px',
+    fontSize: '1.25rem',
   },
   totalPoints: {
-    fontSize: '1.5rem',
+    fontSize: '2rem',
     fontWeight: 700,
-    color: '#5865F2',
+    color: '#FAA61A',
   },
 };

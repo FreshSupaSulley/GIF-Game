@@ -19,3 +19,6 @@ export {
   useScores,
   useCurrentGif,
 } from '../providers';
+
+// Accessibility hooks
+export { useReducedMotion, getReducedMotionProps } from './useReducedMotion';

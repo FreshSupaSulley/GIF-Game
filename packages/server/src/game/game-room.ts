@@ -125,6 +125,16 @@ export class GameRoom {
     return this.players;
   }
 
+  /** 
+   * Updates the events handlers (broadcast/sendTo).
+   * Call this when player connections change to ensure messages reach current sockets.
+   */
+  setEvents(events: GameRoomEvents): void {
+    this.events = events;
+    // Also update timer service's broadcast function
+    this.timerService.setBroadcast((msg) => this.events.broadcast(msg));
+  }
+
   /**
    * Adds a player to the room and sets them as host if they're the first.
    * @returns true if the player was added successfully.
@@ -199,6 +209,12 @@ export class GameRoom {
       case 'game:newGame':
         this.handleNewGame(playerId);
         break;
+      case 'host:transfer':
+        this.handleHostTransfer(playerId, action.playerId);
+        break;
+      case 'game:cancel':
+        this.handleGameCancel(playerId);
+        break;
       default:
         // gif:search and join are handled at the gateway level
         break;
@@ -232,6 +248,39 @@ export class GameRoom {
     this.events.broadcast({
       type: 'state:patch',
       patch: { config: this.config },
+    });
+  }
+
+  private handleHostTransfer(currentHostId: string, newHostId: string): void {
+    // Only the current host can transfer
+    if (currentHostId !== this.hostId) {
+      this.sendError(currentHostId, 'NOT_HOST', 'Only the host can transfer host privileges');
+      return;
+    }
+
+    // Check that the target player exists and is connected
+    const targetPlayer = this.players.get(newHostId);
+    if (!targetPlayer) {
+      this.sendError(currentHostId, 'PLAYER_NOT_FOUND', 'Target player not found');
+      return;
+    }
+
+    if (!targetPlayer.connected) {
+      this.sendError(currentHostId, 'PLAYER_DISCONNECTED', 'Cannot transfer host to a disconnected player');
+      return;
+    }
+
+    // Don't allow transfer to CPU players
+    if (newHostId.startsWith('cpu-')) {
+      this.sendError(currentHostId, 'INVALID_TARGET', 'Cannot transfer host to a CPU player');
+      return;
+    }
+
+    // Transfer host
+    this.hostId = newHostId;
+    this.events.broadcast({
+      type: 'player:hostChanged',
+      playerId: newHostId,
     });
   }
 
@@ -305,6 +354,12 @@ export class GameRoom {
     }
 
     this.submissions = this.submissionHandler.getSubmissions();
+    console.log('[GameRoom] handleGifSelect - updated submissions, now calling checkSubmissionComplete');
+    console.log('[GameRoom] Submission after select:', { 
+      playerId, 
+      gifCount: this.submissions.get(playerId)?.gifs.length,
+      finalized: this.submissions.get(playerId)?.finalized 
+    });
     this.events.broadcast({
       type: 'state:patch',
       patch: { submissions: Object.fromEntries(this.submissions) },
@@ -335,11 +390,21 @@ export class GameRoom {
   }
 
   private checkSubmissionComplete(): void {
-    const allFinalized = this.submissionHandler.allFinalized(
-      this.players.getConnected().map(p => p.id)
-    );
+    const connectedPlayerIds = this.players.getConnected().map(p => p.id);
+    const allFinalized = this.submissionHandler.allFinalized(connectedPlayerIds);
+
+    console.log('[GameRoom] checkSubmissionComplete:', {
+      connectedPlayers: connectedPlayerIds,
+      allFinalized,
+      submissions: [...this.submissionHandler.getSubmissions().entries()].map(([id, sub]) => ({
+        id,
+        gifCount: sub.gifs.length,
+        finalized: sub.finalized,
+      })),
+    });
 
     if (allFinalized) {
+      console.log('[GameRoom] All players finalized, transitioning to guessing...');
       this.timerService.cancel(TimerIds.submission());
       this.transitionToGuessing();
     }
@@ -440,6 +505,25 @@ export class GameRoom {
     this.resetToLobby(false);
   }
 
+  private handleGameCancel(playerId: string): void {
+    // Only allow canceling during active game phases
+    if (this.phase === 'lobby' || this.phase === 'endgame') {
+      this.sendError(playerId, 'WRONG_PHASE', 'Can only cancel during an active game');
+      return;
+    }
+
+    if (playerId !== this.hostId) {
+      this.sendError(playerId, 'NOT_HOST', 'Only the host can cancel the game');
+      return;
+    }
+
+    // Cancel any active timers
+    this.timerService.cancelAll();
+
+    // Reset to lobby, keeping current config
+    this.resetToLobby(true);
+  }
+
   private async checkGuessTurnComplete(): Promise<void> {
     if (!this.guessingHandler.isTurnComplete()) return;
 
@@ -525,9 +609,11 @@ export class GameRoom {
     }
 
     // Broadcast updated state
+    const stateToSend = this.getState();
+    console.log('[GameRoom] Broadcasting state:full for guessing phase, phase =', stateToSend.phase);
     this.events.broadcast({
       type: 'state:full',
-      state: this.getState(),
+      state: stateToSend,
     });
 
     // Start timer for this turn
@@ -627,22 +713,33 @@ export class GameRoom {
    * CPU players submit their GIFs with random delays.
    */
   private async scheduleCpuSubmissions(): Promise<void> {
-    if (!this.cpuService) return;
+    if (!this.cpuService) {
+      console.log('[GameRoom] scheduleCpuSubmissions: No CPU service');
+      return;
+    }
 
     const cpuIds = this.cpuService.getCpuIds().filter(id => this.players.get(id));
+    console.log('[GameRoom] scheduleCpuSubmissions:', { cpuIds });
     
     for (const cpuId of cpuIds) {
       // Stagger CPU submissions with random delays
       const delay = this.cpuService.getActionDelay();
+      console.log(`[GameRoom] Scheduling CPU ${cpuId} submission in ${delay}ms`);
       setTimeout(() => this.performCpuSubmission(cpuId), delay);
     }
   }
 
   private async performCpuSubmission(cpuId: string): Promise<void> {
-    if (!this.cpuService || this.phase !== 'submission') return;
+    console.log(`[GameRoom] performCpuSubmission starting for ${cpuId}, phase=${this.phase}`);
+    if (!this.cpuService || this.phase !== 'submission') {
+      console.log(`[GameRoom] performCpuSubmission aborted: cpuService=${!!this.cpuService}, phase=${this.phase}`);
+      return;
+    }
 
     try {
+      console.log(`[GameRoom] CPU ${cpuId} fetching random GIFs...`);
       const gifs = await this.cpuService.selectRandomGifs(this.config.roundCount);
+      console.log(`[GameRoom] CPU ${cpuId} got ${gifs.length} GIFs`);
       
       for (const gif of gifs) {
         if (this.phase !== 'submission') break; // Phase may have changed
@@ -667,8 +764,17 @@ export class GameRoom {
   }
 
   private transitionToGuessing(): void {
+    console.log('[GameRoom] transitionToGuessing called');
+    console.log('[GameRoom] Submissions for pool:', [...this.submissions.entries()].map(([id, sub]) => ({
+      id,
+      gifCount: sub.gifs.length,
+      finalized: sub.finalized,
+    })));
+    
     // Build mystery pool
     const poolResult = buildPool(this.submissions, this.config.roundCount);
+    console.log('[GameRoom] buildPool result:', poolResult.ok ? `OK, ${poolResult.pool?.length} entries` : poolResult.error);
+    
     if (!poolResult.ok) {
       console.error('[GameRoom] Failed to build mystery pool:', poolResult.error);
       // Fall back to endgame if pool can't be built

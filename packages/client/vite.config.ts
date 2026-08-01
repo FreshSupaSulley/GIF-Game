@@ -8,6 +8,20 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: true,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          // Vendor chunks for better caching
+          'react-vendor': ['react', 'react-dom'],
+          // Animation libraries in separate chunk
+          'animation': ['motion', 'lottie-react'],
+          // Particles in separate chunk (larger library)
+          'particles': ['@tsparticles/slim', '@tsparticles/react', '@tsparticles/engine'],
+        },
+      },
+    },
+    // Increase warning limit since we're chunking appropriately
+    chunkSizeWarningLimit: 500,
   },
   server: {
     port: 5173,

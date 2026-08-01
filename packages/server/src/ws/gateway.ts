@@ -212,10 +212,21 @@ export class Gateway {
    */
   broadcastToRoom(roomId: string, message: ServerMessage): void {
     const json = JSON.stringify(message);
-    for (const connection of this.connections.values()) {
-      if (connection.roomId === roomId && connection.ws.readyState === WebSocket.OPEN) {
+    let sentCount = 0;
+    const connectionInfo: string[] = [];
+    for (const [playerId, connection] of this.connections.entries()) {
+      const matches = connection.roomId === roomId;
+      const isOpen = connection.ws.readyState === WebSocket.OPEN;
+      connectionInfo.push(`${playerId.slice(0,8)}... room=${connection.roomId.slice(0,20)}... matches=${matches} open=${isOpen}`);
+      if (matches && isOpen) {
         connection.ws.send(json);
+        sentCount++;
       }
+    }
+    console.log(`[Gateway] Broadcast ${message.type} to ${sentCount}/${this.connections.size} clients`);
+    if (sentCount === 0 && this.connections.size > 0) {
+      console.log(`[Gateway] Connection details:`, connectionInfo);
+      console.log(`[Gateway] Target roomId: ${roomId.slice(0, 30)}...`);
     }
   }
 

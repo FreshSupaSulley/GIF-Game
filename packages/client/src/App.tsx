@@ -5,6 +5,16 @@ import {
   GameStateProvider,
 } from './providers';
 import { GameRouter, LoadingSpinner } from './components';
+import { ParticlesProvider } from '@tsparticles/react';
+import { loadSlim } from '@tsparticles/slim';
+
+/**
+ * Initialize the tsParticles engine with slim preset.
+ * This is called once by ParticlesProvider.
+ */
+const particlesInit = async (engine: Parameters<typeof loadSlim>[0]) => {
+  await loadSlim(engine);
+};
 
 /**
  * Loading screen component.
@@ -32,36 +42,56 @@ function ErrorScreen({ error }: { error: string }) {
 }
 
 /**
+ * Main game content.
+ * Backgrounds are now controlled by GameRouter based on displayedPhase
+ * so they respect stinger transitions.
+ */
+function GameContent() {
+  return (
+    <>
+      <GameRouter />
+    </>
+  );
+}
+
+/**
  * Connected app that sets up WebSocket after Discord auth.
+ * Particles don't show during loading/error states.
  */
 function ConnectedApp() {
   const { status, user, instanceId, accessToken, error } = useDiscord();
 
   if (status === 'loading') {
-    return <LoadingScreen message="Connecting to Discord..." />;
+    return (
+      <LoadingScreen message="Connecting..." />
+    );
   }
 
   if (status === 'error' || !user || !instanceId || !accessToken) {
-    return <ErrorScreen error={error ?? 'Authentication failed'} />;
+    return (
+      <ErrorScreen error={error ?? 'Authentication failed'} />
+    );
   }
 
   return (
     <WebSocketProvider accessToken={accessToken} instanceId={instanceId}>
       <GameStateProvider playerId={user.id}>
-        <GameRouter />
+        <GameContent />
       </GameStateProvider>
     </WebSocketProvider>
   );
 }
 
 /**
- * Root App component with Discord provider.
+ * Root App component with Discord provider and particles.
  */
 export default function App() {
   return (
-    <DiscordSDKProvider>
-      <ConnectedApp />
-    </DiscordSDKProvider>
+    <ParticlesProvider init={particlesInit}>
+      <DiscordSDKProvider>
+        <ConnectedApp />
+      </DiscordSDKProvider>
+    </ParticlesProvider>
   );
 }
 
